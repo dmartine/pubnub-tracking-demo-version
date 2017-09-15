@@ -154,10 +154,14 @@
                                 delete currentSims[driverId];
                             }
 
-                            deliverySimTools.simulateDrive(driverId, routeId, locationUpdated,
-                                simInterval /* ms */ , 5).then(
-                                function (
-                                    result) {
+                            deliverySimTools.simulateDrive({
+                                driverId: driverId, 
+                                routeId: routeId,
+                                locationUpdateCallback: locationUpdated,
+                                interval: simInterval /* ms */,
+                                pauseDuration: 5
+                            }).then(
+                                function (result) {
                                     result.speed = simSpeed;
                                     currentSims[result.id] = result;
                                 }).otherwise(function (error) {

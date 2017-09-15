@@ -78,8 +78,14 @@ define([
         cruiseRouteId: __cruiseRouteId
     }
 
-    function __simulateDrive(driverId, routeId, locationUpdateCallback, interval, pauseDuration) {
+    function __simulateDrive(options) {
         var promise = new dojo.Deferred();
+
+        var driverId = options["driverId"],
+            routeId = options["routeId"], 
+            locationUpdateCallback = options["locationUpdateCallback"], 
+            interval = options["interval"], 
+            pauseDuration = options["pauseDuration"]
 
         if (routeId === undefined || routeId === null || routeId === '' || routeId == __cruiseRouteId) {
             routeId = __cruiseRouteId;
@@ -151,7 +157,7 @@ define([
             }
 
             driverSim.currentLocation = nextLocation;
-            driverSim.locationUpdateCallback(nextLocation, driverSim, arrivedAtStop);
+            driverSim.locationUpdateCallback(nextLocation, driverSim, arrivedAtStop, departedStop);
 
         }, driverSim.__intTimerInterval);
 
