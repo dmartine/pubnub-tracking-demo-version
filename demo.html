@@ -251,7 +251,6 @@
 
             "deliveries/tools",
             "deliveries/simtools",
-            "deliveries/demo",
             "config.js",
 
             // Bootstrap
@@ -270,7 +269,7 @@
             SimpleMarkerSymbol, SimpleLineSymbol, SimpleFillSymbol, UniqueValueRenderer, SimpleRenderer,
             Graphic, GraphicsLayer, Query, IdentityManager,
             Basemaps, Search, Legend, LayerList,
-            Print, ScaleBar, deliveryTools, deliverySimTools, deliverDemo, config) {
+            Print, ScaleBar, deliveryTools, deliverySimTools, config) {
 
             // Map stuff
             var map, mapView, basemaps, searchWidget, layerWidget, scaleBar;
@@ -295,6 +294,22 @@
 
             // var currentSims = {};
             var driversLayer;
+
+            /// DEMO DEMO DEMO!
+            var simRouteIds,
+                currentSimIndex = 0,
+                simDriverId,
+                mapCenter,
+                mapZoom;
+
+            // milliseconds
+            var simSpeed = 20,
+                simInterval = 60,
+                timeBetweenRoutes = 500;
+
+            var currentSim;
+
+
 
             IdentityManager.tokenValidity = 60*24*7;
 
@@ -337,6 +352,12 @@
                     publishKey: config.publishKey,
                     subscribeKey: config.subscribeKey
                 };
+
+                simRouteIds = config.simRouteIds || [];
+                simDriverId = config.driverId;
+
+                mapCenter = config.center || [-73.97, 40.75];
+                mapZoom = config.zoom || 12
             }
 
 
@@ -347,7 +368,7 @@
 
             function initMap() {
                 map = new Map({
-                    basemap: "streets-navigation-vector",
+                    basemap: "gray-vector",
                     layers: [
                         serviceLayers.deliveryFence,
                         serviceLayers.route,
@@ -361,8 +382,8 @@
                 mapView = new MapView({
                     container: "mapViewDiv",
                     map: map,
-                    center: [-73.97, 40.75],
-                    zoom: 12,
+                    center: mapCenter,
+                    zoom: mapZoom,
                     constraints: {
                         snapToZoom: false
                     }
@@ -536,15 +557,6 @@
             }
 
 
-
-            var simRouteID = '2a25b4c1-96b9-4c3c-8b52-b9540db90aee',
-                simDriverID = '220c9781-deb7-40f8-8452-2b6e238d9c33';
-
-            var simSpeed = 5,
-                simInterval = 100;
-
-            var currentSim;
-
             function initButtonClickListener() {
                 $('#trackingStart').on('click', function (e) {
                     if (currentSim !== undefined) {
@@ -554,12 +566,7 @@
 
                     // onTrackingStartHandler();
                     // buildRouteHandler(serviceURL, driverId /* default is __drivers.andy */ , customers);
-                    var options = {
-                        routeId: simRouteID,
-                        driverId: simDriverID
-                    };
-
-                    startSimulation(options);
+                    startNextSimulation();
                 });
 
                 $('#trackingStop').on('click', function (e) {
@@ -573,6 +580,20 @@
 
                     currentSim.pause();
                 });
+            }
+
+            function startNextSimulation() {
+                if ((simRouteIds || []).length == 0) {
+                    console.warn("There are no routes configured! I'm not gonna do anything. 😤");
+                    return;
+                }
+
+                var options = {
+                    routeId: simRouteIds[currentSimIndex],
+                    driverId: simDriverId
+                };
+
+                startSimulation(options);
             }
 
 
@@ -641,12 +662,19 @@
             function startRoute(routeId, driverSim) {
                 console.log(`Started route ${routeId}`);
                 driverSim.nextFence = undefined;
+                driverSim.hasEnteredNextFence = false;
                 createDeliveryRenderer(routeId, 1);
             }
 
             function endRoute(routeId) {
                 console.log(`Ended route ${routeId}`);
                 currentSim = undefined;
+                currentSimIndex += 1;
+                if (currentSimIndex > simRouteIds.length-1) {
+                    currentSimIndex = 0;
+                }
+                showNoRoute();
+                window.setTimeout(startNextSimulation, timeBetweenRoutes);
             }
 
             function createDeliveryRenderer(routeId, sequence) {
@@ -667,7 +695,6 @@
                 );
 
                 serviceLayers.delivery.renderer = renderer;
-                console.log(renderer.valueExpression);
             }
 
 
@@ -1149,7 +1176,7 @@
             //         // buildRouteHandler(serviceURL, driverId /* default is __drivers.andy */ , customers);
             //         var options = {
             //             routeId: simRouteID,
-            //             driverId: simDriverID
+            //             driverId: simDriverId
             //         };
             //     });
 
