@@ -239,6 +239,7 @@
             "esri/Graphic",
             "esri/layers/GraphicsLayer",
             "esri/tasks/support/Query",
+            "esri/identity/IdentityManager",
 
             // Widgets
             "esri/widgets/BasemapGallery",
@@ -265,9 +266,10 @@
             "dojo/domReady!"
         ], function (
             Map, WebMap, MapView,
-            FeatureLayer, Point, SimpleMarkerSymbol, SimpleLineSymbol, SimpleFillSymbol, UniqueValueRenderer,
-            SimpleRenderer,
-            Graphic, GraphicsLayer, Query, Basemaps, Search, Legend, LayerList,
+            FeatureLayer, Point, 
+            SimpleMarkerSymbol, SimpleLineSymbol, SimpleFillSymbol, UniqueValueRenderer, SimpleRenderer,
+            Graphic, GraphicsLayer, Query, IdentityManager,
+            Basemaps, Search, Legend, LayerList,
             Print, ScaleBar, deliveryTools, deliverySimTools, deliverDemo, config) {
 
             // Map stuff
@@ -283,16 +285,18 @@
             // Here's our symbol JSON
             var defaultCustomerPointSymbolJSON, defaultDeliveryFenceSymbolJSON, activetDeliveryFenceSymbolJSON;
 
+            var defaultDeliverySymbolJSON, laterDeliveryPointSymbolJSON, nextDeliveryPointSymbolJSON, doneDeliveryPointSymbolJSON;
+
             // Pubnub globals
             var pubnub, pubnubDelivery;
 
             // Config
             var pubnubConfig, serviceURL, simServiceURL;
 
-            var currentSims = {};
+            // var currentSims = {};
             var driversLayer;
 
-
+            IdentityManager.tokenValidity = 60*24*7;
 
             initConfig();
 
@@ -345,10 +349,10 @@
                 map = new Map({
                     basemap: "streets-navigation-vector",
                     layers: [
-                        serviceLayers.delivery,
                         serviceLayers.deliveryFence,
                         serviceLayers.route,
                         serviceLayers.customer,
+                        serviceLayers.delivery,
                         driversLayer
                     ]
                 });
@@ -423,16 +427,63 @@
                 nextDeliveryDiv = document.getElementById("nextDeliveryDiv");
                 nextDeliveryDiv.innerHTML = "No deliveries scheduled";
 
-                defaultCustomerPointSymbolJSON = {
+                defaultDeliverySymbolJSON = {
                     "type": "esriSMS",
                     "style": "esriSMSCircle",
-                    "color": [0, 0, 0, 255],
-                    "size": 7,
+                    "color": [142, 14, 14, 0],
+                    "size": 20
+                };
+                laterDeliveryPointSymbolJSON = {
+                    "type": "esriSMS",
+                    "style": "esriSMSCircle",
+                    "color": [142, 14, 14, 255],
+                    "size": 10,
                     "angle": 0,
                     "xoffset": 0,
                     "yoffset": 0,
                     "outline": {
                         "color": [255, 255, 255, 255],
+                        "width": 1
+                    }
+                };
+                nextDeliveryPointSymbolJSON = {
+                    "type": "esriSMS",
+                    "style": "esriSMSCircle",
+                    "color": [209, 204, 81, 255],
+                    "size": 17,
+                    "angle": 0,
+                    "xoffset": 0,
+                    "yoffset": 0,
+                    "outline": {
+                        "color": [255, 255, 255, 255],
+                        "width": 1
+                    }
+                };
+                doneDeliveryPointSymbolJSON = {
+                    "type": "esriSMS",
+                    "style": "esriSMSCircle",
+                    "color": [21, 119, 31, 200],
+                    "size": 12,
+                    "angle": 0,
+                    "xoffset": 0,
+                    "yoffset": 0,
+                    "outline": {
+                        "color": [255, 255, 255, 200],
+                        "width": 1
+                    }
+                };
+
+
+                defaultCustomerPointSymbolJSON = {
+                    "type": "esriSMS",
+                    "style": "esriSMSCircle",
+                    "color": [100, 100, 100, 100],
+                    "size": 7,
+                    "angle": 0,
+                    "xoffset": 0,
+                    "yoffset": 0,
+                    "outline": {
+                        "color": [255, 255, 255, 100],
                         "width": 1
                     }
                 };
@@ -478,11 +529,7 @@
                 serviceLayers.customer.id = "customer";
 
                 // Initialize the layers to show no data
-                serviceLayers.delivery.definitionExpression =
-                    "GlobalID = '00000000-0000-0000-0000-000000000000'";
-                serviceLayers.route.definitionExpression = "GlobalID = '00000000-0000-0000-0000-000000000000'";
-                serviceLayers.deliveryFence.definitionExpression =
-                    "RouteID = '00000000-0000-0000-0000-000000000000'";
+                showNoRoute();
 
                 // For simulation...
                 deliveryTools.setSimLayers(simServiceURL);
@@ -490,14 +537,21 @@
 
 
 
-            var simRouteID = 'c633e9b3-1688-4fad-9183-247a86bfe818',
+            var simRouteID = '2a25b4c1-96b9-4c3c-8b52-b9540db90aee',
                 simDriverID = '220c9781-deb7-40f8-8452-2b6e238d9c33';
 
             var simSpeed = 5,
                 simInterval = 100;
 
+            var currentSim;
+
             function initButtonClickListener() {
                 $('#trackingStart').on('click', function (e) {
+                    if (currentSim !== undefined) {
+                        currentSim.resume();
+                        return;
+                    }
+
                     // onTrackingStartHandler();
                     // buildRouteHandler(serviceURL, driverId /* default is __drivers.andy */ , customers);
                     var options = {
@@ -509,7 +563,15 @@
                 });
 
                 $('#trackingStop').on('click', function (e) {
-                    onTrackingStopHandler();
+                    if (currentSim === undefined) {
+                        return;
+                    } else if (currentSim.status == 'paused') {
+                        currentSim = undefined;
+                        showNoRoute();
+                        return;
+                    }
+
+                    currentSim.pause();
                 });
             }
 
@@ -522,11 +584,11 @@
 
                 showRoute(routeId);
 
-                var currentSimForDriver = currentSims[driverId];
-                if (currentSimForDriver !== undefined) {
-                    currentSimForDriver.abort();
-                    delete currentSims[driverId];
-                }
+                // var currentSimForDriver = currentSims[driverId];
+                // if (currentSimForDriver !== undefined) {
+                //     currentSimForDriver.abort();
+                //     delete currentSims[driverId];
+                // }
 
                 deliverySimTools.simulateDrive({
                     driverId: driverId,
@@ -537,7 +599,8 @@
                 }).then(
                     function (result) {
                         result.speed = simSpeed;
-                        currentSims[result.id] = result;
+                        // currentSims[result.id] = result;
+                        currentSim = result;
                         startRoute(routeId, result);
                     }).otherwise(function (error) {
                     console.log(`Error simulating Route ${routeId}`,
@@ -567,6 +630,7 @@
                     driverSim.hasEnteredNextFence = false;
                     createDefaultDeliveryFenceRenderer();
                     createDefaultCustomerRenderer();
+                    createDeliveryRenderer(routeId, sequence);
                 }
 
                 checkIfDriverEnteredNextFence(newLocation, driverSim);
@@ -577,11 +641,35 @@
             function startRoute(routeId, driverSim) {
                 console.log(`Started route ${routeId}`);
                 driverSim.nextFence = undefined;
+                createDeliveryRenderer(routeId, 1);
             }
 
             function endRoute(routeId) {
                 console.log(`Ended route ${routeId}`);
+                currentSim = undefined;
             }
+
+            function createDeliveryRenderer(routeId, sequence) {
+                var renderer = new UniqueValueRenderer({
+                    valueExpression: `When($feature.sequence < ${sequence}, 'done', $feature.sequence > ${sequence}, 'later', 'next')`,
+                    valueExpressionTitle: "Delivered",
+                    defaultSymbol: SimpleFillSymbol.fromJSON(defaultDeliverySymbolJSON)
+                });
+
+                renderer.addUniqueValueInfo("done",
+                    SimpleMarkerSymbol.fromJSON(doneDeliveryPointSymbolJSON)
+                );
+                renderer.addUniqueValueInfo("next",
+                    SimpleMarkerSymbol.fromJSON(nextDeliveryPointSymbolJSON)
+                );
+                renderer.addUniqueValueInfo("later",
+                    SimpleMarkerSymbol.fromJSON(laterDeliveryPointSymbolJSON)
+                );
+
+                serviceLayers.delivery.renderer = renderer;
+                console.log(renderer.valueExpression);
+            }
+
 
             function checkIfDriverEnteredNextFence(newLocation, driverSim) {
                 if (driverSim.hasEnteredNextFence === true) {
@@ -610,7 +698,7 @@
                             nextDeliveryDiv.innerHTML =
                                 `${attributes.Name}</br>${attributes.SingleLineAddress}</br>Arriving Soon!`;
 
-                            createCustomerByNameRenderer(attributes.Name);
+                            // createCustomerByNameRenderer(attributes.Name);
                         });
                 }
             }
@@ -1169,9 +1257,17 @@
                 return promise;
             }
 
-            function showRoute(routeID) {
-                serviceLayers.route.definitionExpression = `GlobalID='${routeID}'`;
-                serviceLayers.deliveryFence.definitionExpression = `RouteID = '${routeID}'`;
+            function showNoRoute() {
+                let nullRouteId = "00000000-0000-0000-0000-000000000000";
+                showRoute(nullRouteId);
+                createDefaultCustomerRenderer();
+                createDeliveryRenderer(nullRouteId,0);
+            }
+
+            function showRoute(routeId) {
+                serviceLayers.delivery.definitionExpression = `RouteID = '${routeId}'`;
+                serviceLayers.route.definitionExpression = `GlobalID='${routeId}'`;
+                serviceLayers.deliveryFence.definitionExpression = `RouteID = '${routeId}'`;
             }
 
             function onMapClickHandler(screenPoint) {
